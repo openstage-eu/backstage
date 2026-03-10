@@ -11,6 +11,7 @@ jobs:
         run: |
           echo "Pipeline status: ${{ github.event.client_payload.status }}"
           echo "Date: ${{ github.event.client_payload.date }}"
+          echo "Message: ${{ github.event.client_payload.message }}"
 
       - name: Send email on failure
         if: github.event.client_payload.status == 'failure'
@@ -23,6 +24,7 @@ jobs:
           subject: "backstage pipeline FAILED"
           body: |
             Pipeline run on ${{ github.event.client_payload.date }} failed.
+            ${{ github.event.client_payload.message }}
             Check S3 logs at logs/${{ github.event.client_payload.date }}/run.log
           to: ${{ secrets.NOTIFICATION_EMAIL }}
           from: ${{ secrets.SMTP_FROM }}

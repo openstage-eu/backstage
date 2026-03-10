@@ -9,6 +9,10 @@ Reads procedure references from the latest SPARQL snapshot in
 Download modes:
 - full (default): download everything, overwrite existing
 - incremental: only download procedures without an existing .rdf file
+
+After the initial run, runs up to 3 reconciliation rounds to retry
+any missing downloads. Raises RuntimeError if the set is still
+incomplete after all rounds.
 """
 
 import requests
@@ -21,6 +25,7 @@ from backstage.utils.user_agent import get_user_agent
 
 
 CELLAR_BASE_URL = "https://publications.europa.eu/resource/procedure"
+MAX_RECONCILIATION_ROUNDS = 3
 
 
 def fetch_rdf_tree(proc_ref: str) -> bytes:
@@ -93,33 +98,28 @@ def download_one(proc_ref: str, case: str, mode: str) -> dict:
     return {"proc_ref": proc_ref, "status": "downloaded"}
 
 
-@task
-def aggregate_results(results: list[dict]) -> dict:
-    """Aggregate download results into stats."""
-    logger = get_run_logger()
-    stats = {
-        "total": len(results),
-        "downloaded": sum(1 for r in results if r["status"] == "downloaded"),
-        "skipped": sum(1 for r in results if r["status"] == "skipped"),
-        "failed": sum(1 for r in results if r["status"] == "failed"),
+def _list_raw_refs(case: str) -> set[str]:
+    """List procedure refs that have raw RDF files on S3."""
+    prefix = f"{case}/procedures/raw/"
+    objects = s3.list_objects(prefix)
+    return {
+        obj["Key"].rsplit("/", 1)[-1].replace(".rdf", "")
+        for obj in objects
+        if obj["Key"].endswith(".rdf")
     }
-    logger.info("Download complete: %s", stats)
-    return stats
 
 
-@task
-def validate_downloads(stats: dict) -> None:
-    """Check failure rate is acceptable."""
-    logger = get_run_logger()
-    total = stats["total"]
-    if total > 0 and stats["failed"] / total > 0.1:
-        raise ValueError(
-            f"High failure rate: {stats['failed']}/{total} "
-            f"({stats['failed']/total:.1%})"
-        )
-    if stats["failed"] > 0:
-        logger.warning("Failed downloads: %d/%d", stats["failed"], total)
-    logger.info("Download validation passed")
+def _run_downloads(
+    proc_refs: list[str], case: str, mode: str, logger,
+) -> None:
+    """Run .map() downloads, swallowing individual failures."""
+    logger.info("Downloading %d procedures", len(proc_refs))
+    futures = download_one.map(proc_refs, unmapped(case), unmapped(mode))
+    for future in futures:
+        try:
+            future.result()
+        except Exception:
+            pass
 
 
 @flow(
@@ -136,6 +136,10 @@ def download_eu_flow(
 ) -> None:
     """Download RDF tree notices for all EU procedures.
 
+    After the initial batch, reconciles against S3 up to 3 times
+    to retry any missing downloads. Raises RuntimeError if the set
+    is still incomplete.
+
     Args:
         mode: "full" (re-download everything) or "incremental" (only new procedures).
     """
@@ -146,25 +150,35 @@ def download_eu_flow(
     logger = get_run_logger()
     snapshot = load_latest_snapshot(case)
     proc_refs = list_procedure_refs(snapshot, sample_mode, sample_limit)
+    expected = set(proc_refs)
 
-    # Process in batches to avoid overwhelming Prefect's ephemeral server
-    batch_size = 200
-    results = []
-    for i in range(0, len(proc_refs), batch_size):
-        batch = proc_refs[i:i + batch_size]
-        logger.info(
-            "Download batch %d-%d / %d",
-            i + 1, min(i + batch_size, len(proc_refs)), len(proc_refs),
+    # Initial run
+    _run_downloads(proc_refs, case, mode, logger)
+
+    # Reconciliation loop
+    for round_num in range(1, MAX_RECONCILIATION_ROUNDS + 1):
+        on_s3 = _list_raw_refs(case)
+        missing = expected - on_s3
+        if not missing:
+            logger.info("All %d procedures downloaded successfully", len(expected))
+            return
+
+        logger.warning(
+            "Reconciliation round %d: %d missing out of %d",
+            round_num, len(missing), len(expected),
         )
-        futures = download_one.map(batch, unmapped(case), unmapped(mode))
-        for future in futures:
-            try:
-                results.append(future.result())
-            except Exception:
-                results.append({"proc_ref": "unknown", "status": "failed"})
+        _run_downloads(sorted(missing), case, mode, logger)
 
-    stats = aggregate_results(results)
-    validate_downloads(stats)
+    # Final check
+    on_s3 = _list_raw_refs(case)
+    missing = expected - on_s3
+    if missing:
+        raise RuntimeError(
+            f"Download incomplete after {MAX_RECONCILIATION_ROUNDS} reconciliation "
+            f"rounds: {len(missing)} procedures still missing. "
+            f"Examples: {sorted(missing)[:5]}"
+        )
+    logger.info("All %d procedures downloaded successfully", len(expected))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,10 @@ the adapter, and writes model_dump() output to {case}/procedures/parsed/{proc_re
 
 Always parses every RDF file. Monthly full rebuild makes skip logic
 unnecessary. Records dependency commit SHAs for reproducibility.
+
+After the initial run, runs up to 3 reconciliation rounds to retry
+any missing parses. Raises RuntimeError if the set is still incomplete
+after all rounds.
 """
 
 from io import BytesIO
@@ -16,6 +20,9 @@ from prefect.utilities.annotations import unmapped
 
 from backstage.utils import s3
 from backstage.utils.versions import get_pipeline_versions
+
+
+MAX_RECONCILIATION_ROUNDS = 3
 
 
 @task
@@ -69,30 +76,26 @@ def parse_one(proc_ref: str, case: str) -> dict:
     return {"proc_ref": proc_ref, "status": "parsed"}
 
 
-@task
-def aggregate_parse_results(results: list[dict]) -> dict:
-    """Aggregate results from parallel parse tasks."""
-    logger = get_run_logger()
-    stats = {
-        "total": len(results),
-        "parsed": sum(1 for r in results if r["status"] == "parsed"),
-        "failed": sum(1 for r in results if r["status"] == "failed"),
+def _list_parsed_refs(case: str) -> set[str]:
+    """List procedure refs that have parsed JSON files on S3."""
+    prefix = f"{case}/procedures/parsed/"
+    objects = s3.list_objects(prefix)
+    return {
+        obj["Key"].rsplit("/", 1)[-1].replace(".json", "")
+        for obj in objects
+        if obj["Key"].endswith(".json")
     }
-    logger.info("Parsing complete: %s", stats)
-    return stats
 
 
-@task
-def validate_parsing(stats: dict) -> None:
-    """Check failure rate is acceptable."""
-    logger = get_run_logger()
-    total = stats["total"]
-    if total > 0 and stats["failed"] / total > 0.1:
-        raise ValueError(
-            f"High parse failure rate: {stats['failed']}/{total} "
-            f"({stats['failed']/total:.1%})"
-        )
-    logger.info("Parse validation passed")
+def _run_parses(proc_refs: list[str], case: str, logger) -> None:
+    """Run .map() parses, swallowing individual failures."""
+    logger.info("Parsing %d procedures", len(proc_refs))
+    futures = parse_one.map(proc_refs, unmapped(case))
+    for future in futures:
+        try:
+            future.result()
+        except Exception:
+            pass
 
 
 @flow(name="parse-eu", retries=0, task_runner=ProcessPoolTaskRunner(max_workers=16))
@@ -102,7 +105,12 @@ def parse_eu_flow(
     sample_limit: int = 10,
     dry_run: bool = False,
 ) -> None:
-    """Parse all downloaded RDF files and write parsed JSON."""
+    """Parse all downloaded RDF files and write parsed JSON.
+
+    After the initial batch, reconciles against S3 up to 3 times
+    to retry any missing parses. Raises RuntimeError if the set
+    is still incomplete.
+    """
     if dry_run:
         get_run_logger().info("DRY RUN: skipping parsing")
         return
@@ -112,25 +120,35 @@ def parse_eu_flow(
     logger.info("Pipeline versions: %s", versions)
 
     proc_refs = list_parseable_refs(case, sample_mode, sample_limit)
+    expected = set(proc_refs)
 
-    # Process in batches to avoid overwhelming Prefect's ephemeral server
-    batch_size = 500
-    results = []
-    for i in range(0, len(proc_refs), batch_size):
-        batch = proc_refs[i:i + batch_size]
-        logger.info(
-            "Parse batch %d-%d / %d",
-            i + 1, min(i + batch_size, len(proc_refs)), len(proc_refs),
+    # Initial run
+    _run_parses(proc_refs, case, logger)
+
+    # Reconciliation loop
+    for round_num in range(1, MAX_RECONCILIATION_ROUNDS + 1):
+        on_s3 = _list_parsed_refs(case)
+        missing = expected - on_s3
+        if not missing:
+            logger.info("All %d procedures parsed successfully", len(expected))
+            return
+
+        logger.warning(
+            "Reconciliation round %d: %d missing out of %d",
+            round_num, len(missing), len(expected),
         )
-        futures = parse_one.map(batch, unmapped(case))
-        for future in futures:
-            try:
-                results.append(future.result())
-            except Exception:
-                results.append({"proc_ref": "unknown", "status": "failed"})
+        _run_parses(sorted(missing), case, logger)
 
-    stats = aggregate_parse_results(results)
-    validate_parsing(stats)
+    # Final check
+    on_s3 = _list_parsed_refs(case)
+    missing = expected - on_s3
+    if missing:
+        raise RuntimeError(
+            f"Parsing incomplete after {MAX_RECONCILIATION_ROUNDS} reconciliation "
+            f"rounds: {len(missing)} procedures still missing. "
+            f"Examples: {sorted(missing)[:5]}"
+        )
+    logger.info("All %d procedures parsed successfully", len(expected))
 
 
 if __name__ == "__main__":

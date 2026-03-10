@@ -11,11 +11,16 @@ write_files:
       DATASET_PERSISTENT_ID_EU=${dataset_persistent_id_eu}
       HCLOUD_TOKEN=${hcloud_token}
       GITHUB_TOKEN=${github_token}
+      PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://postgres:prefect@localhost:5432/prefect
     permissions: '0600'
 
 runcmd:
   # Install system deps and uv
-  - apt-get update && apt-get install -y curl git jq
+  - apt-get update && apt-get install -y curl git jq postgresql
+  - systemctl start postgresql
+  - sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'prefect';"
+  - sudo -u postgres psql -c "CREATE DATABASE prefect;"
+  - sudo -u postgres psql -d prefect -c "CREATE EXTENSION pg_trgm;"
   - curl -LsSf https://astral.sh/uv/install.sh | sh
   - export PATH="/root/.local/bin:$PATH"
   # Clone repo from GitHub
