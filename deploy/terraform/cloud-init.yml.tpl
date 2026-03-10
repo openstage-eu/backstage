@@ -18,8 +18,10 @@ runcmd:
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
-    # Configure PostgreSQL for local TCP password auth
+    # Configure PostgreSQL to listen on localhost with password auth
+    PG_CONF=$(find /etc/postgresql -name postgresql.conf | head -1)
     PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
+    sed -i "s/^#\?listen_addresses\s*=.*/listen_addresses = 'localhost'/" "$PG_CONF"
     sed -i 's/^host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+.*$/host all all 127.0.0.1\/32 md5/' "$PG_HBA"
     sed -i 's/^host\s\+all\s\+all\s\+::1\/128\s\+.*$/host all all ::1\/128 md5/' "$PG_HBA"
     systemctl restart postgresql
