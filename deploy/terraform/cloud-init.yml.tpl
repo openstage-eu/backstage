@@ -18,20 +18,15 @@ runcmd:
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
-    set -ex
-    # Configure PostgreSQL for Prefect (ephemeral server)
+    set -e
+    # Configure PostgreSQL for Prefect (ephemeral server, trust auth)
     PG_VER=$(pg_lsclusters -h | awk '{print $1}')
-    echo "Detected PostgreSQL version: $PG_VER"
-    # Use conf.d drop-in (included by default on Ubuntu)
     echo "listen_addresses = 'localhost'" > /etc/postgresql/$PG_VER/main/conf.d/prefect.conf
-    # Overwrite pg_hba.conf with trust auth
     printf 'local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n' > /etc/postgresql/$PG_VER/main/pg_hba.conf
     systemctl restart postgresql
     pg_isready --host=localhost --timeout=30
-    # Create Prefect database
     sudo -u postgres psql -c "CREATE DATABASE prefect;"
     sudo -u postgres psql -d prefect -c "CREATE EXTENSION pg_trgm;"
-    echo "PostgreSQL setup complete"
   - curl -LsSf https://astral.sh/uv/install.sh | sh
   - export PATH="/root/.local/bin:$PATH"
   # Clone repo from GitHub
@@ -61,7 +56,6 @@ runcmd:
     cd /opt/backstage/repo
     set -a && . ./.env && set +a
     uv run python -c "from backstage.utils.s3 import upload; upload('/var/log/backstage-run.log', 'logs/$(date +%Y-%m-%d)/run.log')" || true
-    uv run python -c "from backstage.utils.s3 import upload; upload('/var/log/cloud-init-output.log', 'logs/$(date +%Y-%m-%d)/cloud-init.log')" || true
   # Report back to GitHub (if token is set)
   - |
     . /opt/backstage/.env

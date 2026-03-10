@@ -4,7 +4,7 @@ Downloads RDF tree notices from Cellar for each procedure and uploads
 them to S3 at {case}/procedures/raw/{proc_ref}.rdf.
 
 Reads procedure references from the latest SPARQL snapshot in
-{case}/state/sparql_snapshots/.
+{case}/procedures/state/sparql_snapshots/.
 
 Download modes:
 - full (default): download everything, overwrite existing
@@ -47,11 +47,11 @@ def fetch_rdf_tree(proc_ref: str) -> bytes:
 def load_latest_snapshot(case: str) -> list[dict]:
     """Load the latest SPARQL snapshot from S3.
 
-    Lists {case}/state/sparql_snapshots/ keys, picks the latest by date
+    Lists {case}/procedures/state/sparql_snapshots/ keys, picks the latest by date
     (key name is {date}.json), reads and returns the list of procedure dicts.
     """
     logger = get_run_logger()
-    prefix = f"{case}/state/sparql_snapshots/"
+    prefix = f"{case}/procedures/state/sparql_snapshots/"
     objects = s3.list_objects(prefix)
 
     snapshot_keys = [

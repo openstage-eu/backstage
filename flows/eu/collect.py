@@ -54,7 +54,7 @@ def save_sparql_snapshot(procedures: list[dict], case: str) -> None:
     """Save a timestamped SPARQL snapshot for reproducibility."""
     logger = get_run_logger()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    key = f"{case}/state/sparql_snapshots/{today}.json"
+    key = f"{case}/procedures/state/sparql_snapshots/{today}.json"
     s3.write_json(procedures, key)
     logger.info("Saved SPARQL snapshot: %s (%d procedures)", key, len(procedures))
 
