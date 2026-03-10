@@ -1,0 +1,26 @@
+name: Cleanup Orphaned Servers
+on:
+  schedule:
+    - cron: '0 6 * * *'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install hcloud
+        run: |
+          curl -sL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar xz
+          sudo mv hcloud /usr/local/bin/
+
+      - name: Delete orphaned servers
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          hcloud server list -l purpose=backstage-pipeline -o json | jq -r '.[].id' | while read id; do
+            CREATED=$(hcloud server describe $id -o json | jq -r '.created')
+            AGE_HOURS=$(( ($(date +%s) - $(date -d "$CREATED" +%s)) / 3600 ))
+            if [ $AGE_HOURS -gt 12 ]; then
+              echo "Deleting orphaned server $id (age: ${AGE_HOURS}h)"
+              hcloud server delete $id
+            fi
+          done

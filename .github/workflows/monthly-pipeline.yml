@@ -1,0 +1,41 @@
+name: Monthly Pipeline
+on:
+  schedule:
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: 'Comma-separated cases to run (default: eu)'
+        default: 'eu'
+      server_type:
+        description: 'Hetzner server type'
+        default: 'cx32'
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve \
+            -var="hcloud_token=${{ secrets.HCLOUD_TOKEN }}" \
+            -var="s3_endpoint=${{ secrets.S3_ENDPOINT_URL }}" \
+            -var="s3_access_key=${{ secrets.S3_ACCESS_KEY }}" \
+            -var="s3_secret_key=${{ secrets.S3_SECRET_KEY }}" \
+            -var="s3_bucket=${{ secrets.S3_BUCKET }}" \
+            -var="github_token=${{ secrets.PIPELINE_GITHUB_TOKEN }}" \
+            -var="dataverse_token=${{ secrets.DATAVERSE_API_TOKEN }}" \
+            -var="dataverse_url=${{ secrets.DATAVERSE_SERVER_URL }}" \
+            -var="dataset_persistent_id_eu=${{ secrets.DATASET_PERSISTENT_ID_EU }}" \
+            -var="cases=${{ github.event.inputs.cases || 'eu' }}" \
+            -var="server_type=${{ github.event.inputs.server_type || 'cx32' }}"

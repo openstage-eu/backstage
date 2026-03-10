@@ -1,0 +1,35 @@
+site_name: backstage
+site_url: https://openstage-eu.github.io/backstage/
+site_description: Data collection and processing pipeline for the openstage project
+repo_url: https://github.com/openstage-eu/backstage
+repo_name: GitHub repository
+
+theme:
+  name: openstage
+  announcement: "backstage is under active development as part of the openstage project and has not reached a stable release."
+  announcement_level: info
+  subsite:
+    text: openstage project
+    url: https://github.com/openstage-eu
+
+nav:
+  - Home: index.md
+  - Pipeline:
+    - Overview: pipeline/overview.md
+    - Usage: pipeline/running.md
+  - Cases:
+    - EU:
+      - Data Universe: cases/eu/data-universe.md
+      - Collection: cases/eu/collection.md
+      - Known Edge Cases: cases/eu/edge-cases.md
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid

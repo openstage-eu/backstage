@@ -1,0 +1,28 @@
+name: Pipeline Notification
+on:
+  repository_dispatch:
+    types: [pipeline-complete]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log pipeline result
+        run: |
+          echo "Pipeline status: ${{ github.event.client_payload.status }}"
+          echo "Date: ${{ github.event.client_payload.date }}"
+
+      - name: Send email on failure
+        if: github.event.client_payload.status == 'failure'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "backstage pipeline FAILED"
+          body: |
+            Pipeline run on ${{ github.event.client_payload.date }} failed.
+            Check S3 logs at logs/${{ github.event.client_payload.date }}/run.log
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: ${{ secrets.SMTP_FROM }}
