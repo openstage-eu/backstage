@@ -3,15 +3,13 @@
 Downloads RDF tree notices from Cellar for each procedure and uploads
 them to S3 at {case}/procedures/raw/{proc_ref}.rdf.
 
-Reads procedure references from per-procedure metadata files in
-{case}/procedures/meta/.
+Reads procedure references from the latest SPARQL snapshot in
+{case}/state/sparql_snapshots/.
 
 Download modes:
 - full (default): download everything, overwrite existing
 - incremental: only download procedures without an existing .rdf file
 """
-
-import hashlib
 
 import requests
 from prefect import flow, task, get_run_logger, unmapped
@@ -41,20 +39,34 @@ def fetch_rdf_tree(proc_ref: str) -> bytes:
 
 
 @task
-def list_procedure_refs(case: str, sample_mode: bool, sample_limit: int) -> list[str]:
-    """List all procedure references from S3 meta key names (no file reads)."""
-    logger = get_run_logger()
+def load_latest_snapshot(case: str) -> list[dict]:
+    """Load the latest SPARQL snapshot from S3.
 
-    prefix = f"{case}/procedures/meta/"
+    Lists {case}/state/sparql_snapshots/ keys, picks the latest by date
+    (key name is {date}.json), reads and returns the list of procedure dicts.
+    """
+    logger = get_run_logger()
+    prefix = f"{case}/state/sparql_snapshots/"
     objects = s3.list_objects(prefix)
 
-    proc_refs = []
-    for obj in objects:
-        key = obj["Key"]
-        if not key.endswith(".json"):
-            continue
-        proc_ref = key.rsplit("/", 1)[-1].replace(".json", "")
-        proc_refs.append(proc_ref)
+    snapshot_keys = [
+        obj["Key"] for obj in objects if obj["Key"].endswith(".json")
+    ]
+    if not snapshot_keys:
+        raise ValueError(f"No SPARQL snapshots found at {prefix}")
+
+    latest_key = sorted(snapshot_keys)[-1]
+    logger.info("Loading SPARQL snapshot: %s", latest_key)
+    return s3.read_json(latest_key)
+
+
+@task
+def list_procedure_refs(
+    snapshot: list[dict], sample_mode: bool, sample_limit: int,
+) -> list[str]:
+    """Extract procedure references from a SPARQL snapshot."""
+    logger = get_run_logger()
+    proc_refs = [row["procedure"] for row in snapshot]
 
     if sample_mode:
         proc_refs = proc_refs[:sample_limit]
@@ -71,19 +83,12 @@ def list_procedure_refs(case: str, sample_mode: bool, sample_limit: int) -> list
 def download_one(proc_ref: str, case: str, mode: str) -> dict:
     """Download a single procedure's RDF tree from Cellar and upload to S3."""
     rdf_key = f"{case}/procedures/raw/{proc_ref}.rdf"
-    meta_key = f"{case}/procedures/meta/{proc_ref}.json"
 
     if mode == "incremental" and s3.exists(rdf_key):
         return {"proc_ref": proc_ref, "status": "skipped"}
 
     content = fetch_rdf_tree(proc_ref)
-    content_hash = hashlib.sha256(content).hexdigest()
-
     s3.upload_bytes(content, rdf_key)
-
-    meta = s3.read_json(meta_key)
-    meta["rdf_hash"] = content_hash
-    s3.write_json(meta, meta_key)
 
     return {"proc_ref": proc_ref, "status": "downloaded"}
 
@@ -139,7 +144,8 @@ def download_eu_flow(
         return
 
     logger = get_run_logger()
-    proc_refs = list_procedure_refs(case, sample_mode, sample_limit)
+    snapshot = load_latest_snapshot(case)
+    proc_refs = list_procedure_refs(snapshot, sample_mode, sample_limit)
 
     # Process in batches to avoid overwhelming Prefect's ephemeral server
     batch_size = 200

@@ -13,26 +13,13 @@ Each result row contains:
 - **procedure reference**: The interinstitutional code (e.g., `2016_399`)
 - **cellar URI**: The Cellar resource identifier (UUID)
 
-### Per-procedure metadata
-
-The pipeline maintains a per-procedure metadata file on S3 at `eu/procedures/meta/{proc_ref}.json`:
-
-| Field | Description |
-|-------|-------------|
-| `rdf_hash` | SHA-256 hash of the most recently downloaded RDF content |
-| `first_seen` | Timestamp when the procedure first appeared in a SPARQL result |
-| `last_seen` | Timestamp when the procedure was last seen in a SPARQL result |
-| `parsed_at` | Timestamp of the most recent parse |
-
-This allows tracking of the procedure universe over time without maintaining a separate database.
-
 ### SPARQL snapshots
 
-Each run also saves the raw SPARQL result as a dated snapshot, providing an audit trail of what the endpoint returned on a given date.
+Each run saves the raw SPARQL result as a dated snapshot at `{case}/state/sparql_snapshots/{date}.json`, providing an audit trail of what the endpoint returned on a given date. Downstream steps (download, parse) read procedure references from this snapshot.
 
 ## Step 2: Download
 
-For each procedure in the manifest, the pipeline downloads the RDF/XML tree notice from Cellar.
+For each procedure in the latest SPARQL snapshot, the pipeline downloads the RDF/XML tree notice from Cellar.
 
 ### Request format
 
@@ -59,7 +46,7 @@ The tree notice format returns the complete procedure record including:
 
 Downloaded RDF notices are parsed by [openbasement](https://github.com/openstage-eu/openbasement), which uses YAML-based extraction templates to convert RDF triples into structured dictionaries. The extracted data is then converted to typed [openstage](https://github.com/openstage-eu/openstage) `EUProcedure` models via the `from_openbasement()` adapter.
 
-Parsed output on S3 is a flat `model_dump()` of the openstage model: `identifiers`, `title`, `events`, `procedure_type`, etc. Operational metadata (`parsed_at`) is recorded in the per-procedure meta file, not in the parsed output.
+Parsed output on S3 is a flat `model_dump()` of the openstage model: `identifiers`, `title`, `events`, `procedure_type`, etc.
 
 ## Step 4: Package
 

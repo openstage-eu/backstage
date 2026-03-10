@@ -8,7 +8,6 @@ Always parses every RDF file. Monthly full rebuild makes skip logic
 unnecessary. Records dependency commit SHAs for reproducibility.
 """
 
-from datetime import datetime, timezone
 from io import BytesIO
 
 from prefect import flow, task, get_run_logger
@@ -57,7 +56,6 @@ def parse_one(proc_ref: str, case: str) -> dict:
     from openstage.models.eu import EUProcedure
 
     rdf_key = f"{case}/procedures/raw/{proc_ref}.rdf"
-    meta_key = f"{case}/procedures/meta/{proc_ref}.json"
     parsed_key = f"{case}/procedures/parsed/{proc_ref}.json"
 
     rdf_bytes = s3.read_bytes(rdf_key)
@@ -67,10 +65,6 @@ def parse_one(proc_ref: str, case: str) -> dict:
 
     procedure = EUProcedure.from_openbasement(result[0])
     s3.write_json(procedure.model_dump(), parsed_key)
-
-    meta = s3.read_json(meta_key)
-    meta["parsed_at"] = datetime.now(timezone.utc).isoformat()
-    s3.write_json(meta, meta_key)
 
     return {"proc_ref": proc_ref, "status": "parsed"}
 
