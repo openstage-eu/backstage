@@ -12,14 +12,17 @@ write_files:
       HCLOUD_TOKEN=${hcloud_token}
       GITHUB_TOKEN=${github_token}
       PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://postgres@localhost:5432/prefect
+      PREFECT_API_URL=http://127.0.0.1:4200/api
     permissions: '0600'
 
 runcmd:
+  # Disable root account expiry (Hetzner sets expired root password, which breaks postgresql post-install chfn)
+  - chage -E -1 -M -1 root
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
     set -e
-    # Configure PostgreSQL for Prefect (ephemeral server, trust auth)
+    # Configure PostgreSQL for Prefect (trust auth, localhost only)
     PG_VER=$(pg_lsclusters -h | awk '{print $1}')
     echo "listen_addresses = 'localhost'" > /etc/postgresql/$PG_VER/main/conf.d/prefect.conf
     printf 'local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n' > /etc/postgresql/$PG_VER/main/pg_hba.conf
@@ -37,6 +40,14 @@ runcmd:
     export PATH="/root/.local/bin:$PATH"
     cd /opt/backstage/repo
     uv sync --extra parsing
+  # Start Prefect server (single server for all processes)
+  - |
+    export PATH="/root/.local/bin:$PATH"
+    cd /opt/backstage/repo
+    set -a && . ./.env && set +a
+    uv run prefect server start --host 127.0.0.1 --port 4200 &
+    sleep 3
+    curl -sf http://127.0.0.1:4200/api/health || { echo "Prefect server failed to start"; exit 1; }
   # Run pipeline
   - |
     set -e
