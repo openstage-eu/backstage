@@ -11,23 +11,29 @@ write_files:
       DATASET_PERSISTENT_ID_EU=${dataset_persistent_id_eu}
       HCLOUD_TOKEN=${hcloud_token}
       GITHUB_TOKEN=${github_token}
-      PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://postgres:prefect@localhost:5432/prefect
+      PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://postgres@localhost:5432/prefect
     permissions: '0600'
 
 runcmd:
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
-    # Configure PostgreSQL to listen on localhost with password auth
-    PG_DIR=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d | head -1)/main
-    echo "listen_addresses = 'localhost'" >> "$PG_DIR/postgresql.conf"
-    echo "host all all 127.0.0.1/32 md5" >> "$PG_DIR/pg_hba.conf"
-    echo "host all all ::1/128 md5" >> "$PG_DIR/pg_hba.conf"
+    # Configure PostgreSQL: trust localhost (ephemeral server, no security needed)
+    PG_VER=$(pg_lsclusters -h | awk '{print $1}')
+    PG_DIR="/etc/postgresql/$PG_VER/main"
+    # Enable TCP on localhost
+    sed -i "s/^#listen_addresses = .*/listen_addresses = 'localhost'/" "$PG_DIR/postgresql.conf"
+    # Trust all local connections (server self-destructs in ~40 min)
+    cat > "$PG_DIR/pg_hba.conf" << 'HBAEOF'
+    local all all trust
+    host all all 127.0.0.1/32 trust
+    host all all ::1/128 trust
+    HBAEOF
     systemctl restart postgresql
-    pg_isready --timeout=10
-  - sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'prefect';"
-  - sudo -u postgres psql -c "CREATE DATABASE prefect;"
-  - sudo -u postgres psql -d prefect -c "CREATE EXTENSION pg_trgm;"
+    pg_isready --host=localhost --timeout=30
+    # Create Prefect database
+    sudo -u postgres psql -c "CREATE DATABASE prefect;"
+    sudo -u postgres psql -d prefect -c "CREATE EXTENSION pg_trgm;"
   - curl -LsSf https://astral.sh/uv/install.sh | sh
   - export PATH="/root/.local/bin:$PATH"
   # Clone repo from GitHub
