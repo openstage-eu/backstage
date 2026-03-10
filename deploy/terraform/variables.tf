@@ -50,11 +50,6 @@ variable "dataset_persistent_id_eu" {
   default   = ""
 }
 
-variable "ssh_public_key" {
-  type    = string
-  default = ""
-}
-
 variable "cases" {
   type    = string
   default = "eu"

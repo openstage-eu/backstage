@@ -11,17 +11,11 @@ provider "hcloud" {
   token = var.hcloud_token
 }
 
-resource "hcloud_ssh_key" "deploy" {
-  name       = "backstage-deploy"
-  public_key = var.ssh_public_key
-}
-
 resource "hcloud_server" "pipeline" {
   name        = "backstage-run-${formatdate("YYYYMMDD-hhmm", timestamp())}"
   server_type = var.server_type
   image       = "ubuntu-24.04"
   location    = "fsn1"
-  ssh_keys    = [hcloud_ssh_key.deploy.id]
 
   user_data = templatefile("${path.module}/cloud-init.yml.tpl", {
     hcloud_token    = var.hcloud_token
