@@ -15,7 +15,7 @@ Each result row contains:
 
 ### SPARQL snapshots
 
-Each run saves the raw SPARQL result as a dated snapshot at `{case}/state/sparql_snapshots/{date}.json`, providing an audit trail of what the endpoint returned on a given date. Downstream steps (download, parse) read procedure references from this snapshot.
+Each run saves the raw SPARQL result as a dated snapshot at `{case}/procedures/state/sparql_snapshots/{date}.json`, providing an audit trail of what the endpoint returned on a given date. Downstream steps (download, parse) read procedure references from this snapshot.
 
 ## Step 2: Download
 

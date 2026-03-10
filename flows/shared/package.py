@@ -16,19 +16,32 @@ from backstage.utils import s3
 
 @task(retries=2, retry_delay_seconds=10)
 def load_parsed_procedures(case: str) -> list[dict]:
-    """Load all parsed procedure JSON files from S3."""
+    """Load all parsed procedure JSON files from S3.
+
+    Tracks per-file failures and raises RuntimeError if any file
+    fails to load (task-level retries handle transient errors first).
+    """
     logger = get_run_logger()
 
     prefix = f"{case}/procedures/parsed/"
     objects = s3.list_objects(prefix)
+    json_keys = [obj["Key"] for obj in objects if obj["Key"].endswith(".json")]
 
     procedures = []
-    for obj in objects:
-        key = obj["Key"]
-        if not key.endswith(".json"):
-            continue
-        proc = s3.read_json(key)
-        procedures.append(proc)
+    failed_keys = []
+    for key in json_keys:
+        try:
+            proc = s3.read_json(key)
+            procedures.append(proc)
+        except Exception as e:
+            logger.error("Failed to load %s: %s", key, e)
+            failed_keys.append(key)
+
+    if failed_keys:
+        raise RuntimeError(
+            f"Failed to load {len(failed_keys)} parsed files: "
+            f"{failed_keys[:5]}"
+        )
 
     logger.info("Loaded %d parsed procedures", len(procedures))
     return procedures
@@ -45,6 +58,9 @@ def build_package(
 ) -> dict:
     """Build ZIP dataset from parsed procedures using openstage Dataset.
 
+    Cross-checks loaded procedure count against raw RDF file count on S3.
+    Mismatch raises RuntimeError (indicates parse step missed something).
+
     Args:
         release: Release period label (YYYY.MM). Defaults to previous month.
         dataset_name: Dataset identifier for the registry (e.g. "openstage-eu").
@@ -55,6 +71,23 @@ def build_package(
     from openstage.models.procedure import Procedure
 
     logger = get_run_logger()
+
+    # Cross-check: parsed count must equal raw RDF count
+    raw_prefix = f"{case}/procedures/raw/"
+    raw_objects = s3.list_objects(raw_prefix)
+    raw_count = sum(1 for obj in raw_objects if obj["Key"].endswith(".rdf"))
+    parsed_count = len(procedures)
+
+    if parsed_count != raw_count:
+        raise RuntimeError(
+            f"Procedure count mismatch: {parsed_count} parsed files vs "
+            f"{raw_count} raw RDF files. Parse step may be incomplete."
+        )
+
+    logger.info(
+        "Cross-check passed: %d parsed == %d raw", parsed_count, raw_count,
+    )
+
     creation_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     if not release:

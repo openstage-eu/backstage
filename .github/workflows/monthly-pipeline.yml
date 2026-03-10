@@ -1,7 +1,10 @@
 name: Monthly Pipeline
 on:
   schedule:
-    - cron: '0 2 1 * *'
+    - cron: '0 2 14 * *'
+    - cron: '0 2 15 * *'
+    - cron: '0 2 17 * *'
+    - cron: '0 2 20 * *'
   workflow_dispatch:
     inputs:
       cases:
@@ -9,23 +12,51 @@ on:
         default: 'eu'
       server_type:
         description: 'Hetzner server type'
-        default: 'cx32'
+        default: 'cx53'
 
 jobs:
   launch:
     runs-on: ubuntu-latest
+    outputs:
+      dataset_exists: ${{ steps.check.outputs.exists }}
     defaults:
       run:
         working-directory: deploy/terraform
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute release version
+        id: release
+        run: echo "version=$(date -u -d '1 month ago' +%Y.%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Check if dataset already exists on S3
+        id: check
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+        run: |
+          RELEASE="${{ steps.release.outputs.version }}"
+          KEY="eu/datasets/${RELEASE}/openstage-eu-${RELEASE}.zip"
+          if aws s3api head-object \
+            --bucket "${{ secrets.S3_BUCKET }}" \
+            --key "$KEY" \
+            --endpoint-url "${{ secrets.S3_ENDPOINT_URL }}" 2>/dev/null; then
+            echo "Dataset already exists at ${KEY}, skipping pipeline"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No dataset at ${KEY}, proceeding with pipeline"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: hashicorp/setup-terraform@v3
+        if: steps.check.outputs.exists == 'false'
 
       - name: Terraform Init
+        if: steps.check.outputs.exists == 'false'
         run: terraform init
 
       - name: Terraform Apply
+        if: steps.check.outputs.exists == 'false'
         run: |
           terraform apply -auto-approve \
             -var="hcloud_token=${{ secrets.HCLOUD_TOKEN }}" \
@@ -38,4 +69,24 @@ jobs:
             -var="dataverse_url=${{ secrets.DATAVERSE_SERVER_URL }}" \
             -var="dataset_persistent_id_eu=${{ secrets.DATASET_PERSISTENT_ID_EU }}" \
             -var="cases=${{ github.event.inputs.cases || 'eu' }}" \
-            -var="server_type=${{ github.event.inputs.server_type || 'cx32' }}"
+            -var="server_type=${{ github.event.inputs.server_type || 'cx53' }}"
+
+  notify-last-attempt:
+    runs-on: ubuntu-latest
+    needs: launch
+    if: >-
+      failure()
+      && github.event_name == 'schedule'
+      && github.event.schedule == '0 2 20 * *'
+    steps:
+      - name: Dispatch failure notification
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PIPELINE_GITHUB_TOKEN }}
+          event-type: pipeline-complete
+          client-payload: >-
+            {
+              "status": "failure",
+              "date": "${{ github.run_id }}",
+              "message": "All monthly pipeline attempts exhausted (14th, 15th, 17th, 20th). Manual intervention required."
+            }
