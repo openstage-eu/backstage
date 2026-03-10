@@ -14,7 +14,7 @@ from prefect import task, get_run_logger
 from backstage.utils import s3
 
 
-@task
+@task(retries=2, retry_delay_seconds=10)
 def load_parsed_procedures(case: str) -> list[dict]:
     """Load all parsed procedure JSON files from S3."""
     logger = get_run_logger()

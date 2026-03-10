@@ -7,9 +7,11 @@ Works with both Hetzner Object Storage and local MinIO.
 
 import json
 import os
+import time
 from typing import Optional
 
 import boto3
+from botocore.exceptions import ConnectionClosedError, ClientError
 
 
 def get_client():
@@ -45,11 +47,17 @@ def download(s3_key: str, local_path: str, bucket: Optional[str] = None) -> None
     client.download_file(bucket or get_bucket(), s3_key, local_path)
 
 
-def read_bytes(s3_key: str, bucket: Optional[str] = None) -> bytes:
-    """Read raw bytes from S3."""
-    client = get_client()
-    response = client.get_object(Bucket=bucket or get_bucket(), Key=s3_key)
-    return response["Body"].read()
+def read_bytes(s3_key: str, bucket: Optional[str] = None, retries: int = 3) -> bytes:
+    """Read raw bytes from S3 with retry on transient connection errors."""
+    for attempt in range(retries):
+        try:
+            client = get_client()
+            response = client.get_object(Bucket=bucket or get_bucket(), Key=s3_key)
+            return response["Body"].read()
+        except (ConnectionClosedError, ClientError) as e:
+            if attempt == retries - 1:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def read_json(s3_key: str, bucket: Optional[str] = None) -> dict:
