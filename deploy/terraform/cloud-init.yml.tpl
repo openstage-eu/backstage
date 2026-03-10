@@ -19,12 +19,12 @@ runcmd:
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
     # Configure PostgreSQL to listen on localhost with password auth
-    PG_CONF=$(find /etc/postgresql -name postgresql.conf | head -1)
-    PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
-    sed -i "s/^#\?listen_addresses\s*=.*/listen_addresses = 'localhost'/" "$PG_CONF"
-    sed -i 's/^host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+.*$/host all all 127.0.0.1\/32 md5/' "$PG_HBA"
-    sed -i 's/^host\s\+all\s\+all\s\+::1\/128\s\+.*$/host all all ::1\/128 md5/' "$PG_HBA"
+    PG_DIR=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d | head -1)/main
+    echo "listen_addresses = 'localhost'" >> "$PG_DIR/postgresql.conf"
+    echo "host all all 127.0.0.1/32 md5" >> "$PG_DIR/pg_hba.conf"
+    echo "host all all ::1/128 md5" >> "$PG_DIR/pg_hba.conf"
     systemctl restart postgresql
+    pg_isready --timeout=10
   - sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'prefect';"
   - sudo -u postgres psql -c "CREATE DATABASE prefect;"
   - sudo -u postgres psql -d prefect -c "CREATE EXTENSION pg_trgm;"
