@@ -11,7 +11,12 @@ Usage:
 
 import argparse
 import importlib
+import os
 from datetime import datetime, timezone
+
+# Prevent Prefect's ephemeral event queue from saturating after high-volume
+# steps (parse: ~135K events). Default is 10,000 which causes 503 errors.
+os.environ.setdefault("PREFECT_EVENTS_MAXIMUM_SIZE_IN_QUEUE", "200000")
 
 from prefect import flow, get_run_logger
 
