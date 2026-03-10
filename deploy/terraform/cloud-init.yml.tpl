@@ -16,8 +16,8 @@ write_files:
     permissions: '0600'
 
 runcmd:
-  # Disable root account expiry (Hetzner sets expired root password, which breaks postgresql post-install chfn)
-  - chage -E -1 -M -1 root
+  # Clear expired root password (Hetzner sets last-change=0, which breaks postgresql post-install chfn via PAM)
+  - passwd -d root
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
