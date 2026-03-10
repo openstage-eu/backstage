@@ -60,3 +60,9 @@ variable "pipeline_args" {
   type        = string
   default     = ""
 }
+
+variable "root_password" {
+  description = "Root password for the server (clears Hetzner's expired-password flag)"
+  type        = string
+  sensitive   = true
+}

@@ -1,4 +1,12 @@
 #cloud-config
+# Set root password early (Hetzner's expired-password flag breaks postgresql post-install chfn via PAM)
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: ${root_password}
+      type: text
+
 write_files:
   - path: /opt/backstage/.env
     content: |
@@ -16,8 +24,6 @@ write_files:
     permissions: '0600'
 
 runcmd:
-  # Clear expired root password (Hetzner sets last-change=0, which breaks postgresql post-install chfn via PAM)
-  - passwd -d root
   # Install system deps and uv
   - apt-get update && apt-get install -y curl git jq postgresql
   - |
@@ -46,7 +52,10 @@ runcmd:
     cd /opt/backstage/repo
     set -a && . ./.env && set +a
     uv run prefect server start --host 127.0.0.1 --port 4200 &
-    sleep 3
+    for i in $(seq 1 30); do
+      curl -sf http://127.0.0.1:4200/api/health && break
+      sleep 1
+    done
     curl -sf http://127.0.0.1:4200/api/health || { echo "Prefect server failed to start"; exit 1; }
   # Run pipeline
   - |

@@ -69,7 +69,8 @@ jobs:
             -var="dataverse_url=${{ secrets.DATAVERSE_SERVER_URL }}" \
             -var="dataset_persistent_id_eu=${{ secrets.DATASET_PERSISTENT_ID_EU }}" \
             -var="cases=${{ github.event.inputs.cases || 'eu' }}" \
-            -var="server_type=${{ github.event.inputs.server_type || 'cx53' }}"
+            -var="server_type=${{ github.event.inputs.server_type || 'cx53' }}" \
+            -var="root_password=${{ secrets.SERVER_ROOT_PASSWORD }}"
 
   notify-last-attempt:
     runs-on: ubuntu-latest

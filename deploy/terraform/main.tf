@@ -29,6 +29,7 @@ resource "hcloud_server" "pipeline" {
     dataset_persistent_id_eu   = var.dataset_persistent_id_eu
     cases                      = var.cases
     pipeline_args              = var.pipeline_args
+    root_password              = var.root_password
   })
 
   labels = {
