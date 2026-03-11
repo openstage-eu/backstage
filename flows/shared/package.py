@@ -6,6 +6,7 @@ Dataset.dump().
 """
 
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,13 +30,15 @@ def load_parsed_procedures(case: str) -> list[dict]:
 
     procedures = []
     failed_keys = []
-    for key in json_keys:
-        try:
-            proc = s3.read_json(key)
-            procedures.append(proc)
-        except Exception as e:
-            logger.error("Failed to load %s: %s", key, e)
-            failed_keys.append(key)
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        futures = {pool.submit(s3.read_json, key): key for key in json_keys}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                procedures.append(future.result())
+            except Exception as e:
+                logger.error("Failed to load %s: %s", key, e)
+                failed_keys.append(key)
 
     if failed_keys:
         raise RuntimeError(
@@ -106,10 +109,7 @@ def build_package(
     procedure_class = resolve_class(dataset_name) or Procedure
     typed_procedures = [procedure_class.model_validate(d) for d in procedures]
 
-    description = (
-        f"openstage {dataset_label} Dataset. "
-        f"Contains {len(typed_procedures)} parsed legislative procedures."
-    )
+    description = f"openstage {dataset_label} Dataset"
 
     dataset = Dataset(
         typed_procedures,
@@ -130,19 +130,6 @@ def build_package(
         zip_key = f"{case}/datasets/{release}/{zip_filename}"
         s3.upload(str(zip_path), zip_key)
 
-        metadata = {
-            "name": dataset_name,
-            "version": release,
-            "description": description,
-            "creation_date": creation_date,
-            "total_procedures": len(typed_procedures),
-        }
-        if pipeline_versions:
-            metadata["pipeline_versions"] = pipeline_versions
-
-        metadata_key = f"{case}/datasets/{release}/metadata.json"
-        s3.write_json(metadata, metadata_key)
-
         size_mb = zip_path.stat().st_size / (1024 * 1024)
         logger.info(
             "Package created: %s (%.1f MB, %d procedures)",
@@ -151,7 +138,6 @@ def build_package(
 
         return {
             "zip_key": zip_key,
-            "metadata_key": metadata_key,
             "size_mb": round(size_mb, 2),
             "total_procedures": len(typed_procedures),
             "release": release,
