@@ -13,6 +13,9 @@ on:
       server_type:
         description: 'Hetzner server type'
         default: 'cx53'
+      location:
+        description: 'Hetzner location (nbg1 = same DC as S3, fsn1 = fallback)'
+        default: 'nbg1'
 
 jobs:
   launch:
@@ -70,6 +73,7 @@ jobs:
             -var="dataset_persistent_id_eu=${{ secrets.DATASET_PERSISTENT_ID_EU }}" \
             -var="cases=${{ github.event.inputs.cases || 'eu' }}" \
             -var="server_type=${{ github.event.inputs.server_type || 'cx53' }}" \
+            -var="location=${{ github.event.inputs.location || 'nbg1' }}" \
             -var="root_password=${{ secrets.SERVER_ROOT_PASSWORD }}"
 
   notify-last-attempt:

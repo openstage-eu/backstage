@@ -15,7 +15,7 @@ resource "hcloud_server" "pipeline" {
   name        = "backstage-run-${formatdate("YYYYMMDD-hhmm", timestamp())}"
   server_type = var.server_type
   image       = "ubuntu-24.04"
-  location    = "fsn1"
+  location    = var.location
 
   user_data = templatefile("${path.module}/cloud-init.yml.tpl", {
     hcloud_token    = var.hcloud_token

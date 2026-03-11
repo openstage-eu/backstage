@@ -50,6 +50,11 @@ variable "dataset_persistent_id_eu" {
   default   = ""
 }
 
+variable "location" {
+  type    = string
+  default = "fsn1"
+}
+
 variable "cases" {
   type    = string
   default = "eu"
